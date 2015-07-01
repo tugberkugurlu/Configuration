@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Microsoft.AspNet.FileProviders;
 
 namespace Microsoft.Framework.Configuration.Ini
 {
@@ -21,29 +22,39 @@ namespace Microsoft.Framework.Configuration.Ini
     /// </examples>
     public class IniFileConfigurationSource : ConfigurationSource
     {
+        private readonly IFileProvider _fileProvider;
+
         /// <summary>
         /// Initializes a new instance of <see cref="IniFileConfigurationSource"/>.
         /// </summary>
-        /// <param name="path">Absolute path of the INI configuration file.</param>
-        public IniFileConfigurationSource(string path)
-            : this(path, optional: false)
+        /// <param name="fileProvider">The file system used to locate the configuration file based on <paramref name="subpath" />.</param>
+        /// <param name="subpath">Relative path of the INI configuration file.</param>
+        public IniFileConfigurationSource(IFileProvider fileProvider, string subpath)
+            : this(fileprovider, subpath, optional: false)
         {
         }
 
         /// <summary>
         /// Initializes a new instance of <see cref="IniFileConfigurationSource"/>.
         /// </summary>
-        /// <param name="path">Absolute path of the INI configuration file.</param>
+        /// <param name="fileProvider">The file system used to locate the configuration file based on <paramref name="subpath" />.</param>
+        /// <param name="subpath">Relative path of the INI configuration file.</param>
         /// <param name="optional">Determines if the configuration is optional.</param>
-        public IniFileConfigurationSource(string path, bool optional)
+        public IniFileConfigurationSource(IFileProvider fileProvider, string subpath, bool optional)
         {
-            if (string.IsNullOrEmpty(path))
+            if(fileProvider == null)
             {
-                throw new ArgumentException(Resources.Error_InvalidFilePath, nameof(path));
+                throw new ArgumentNullException(nameof(fileProvider));
             }
 
+            if (string.IsNullOrEmpty(subpath))
+            {
+                throw new ArgumentException(Resources.Error_InvalidFilePath, nameof(subpath));
+            }
+
+            _fileProvider = fileProvider;
             Optional = optional;
-            Path = path;
+            Subpath = subpath;
         }
 
         /// <summary>
@@ -52,18 +63,20 @@ namespace Microsoft.Framework.Configuration.Ini
         public bool Optional { get; }
 
         /// <summary>
-        /// The absolute path of the file backing this instance of <see cref="IniFileConfigurationSource"/>.
+        /// The relative path of the file backing this instance of <see cref="IniFileConfigurationSource"/>.
         /// </summary>
-        public string Path { get; }
+        public string Subpath { get; }
 
         /// <summary>
-        /// Loads the contents of the file at <see cref="Path"/>.
+        /// Loads the contents of the file at <see cref="Subpath"/>.
         /// </summary>
         /// <exception cref="FileNotFoundException">If <see cref="Optional"/> is <c>false</c> and a
-        /// file does not exist at <see cref="Path"/>.</exception>
+        /// file does not exist at <see cref="Subpath"/>.</exception>
         public override void Load()
         {
-            if (!File.Exists(Path))
+            var fileInfo = _fileProvider.GetFileInfo(Subpath);
+
+            if (!fileInfo.Exists)
             {
                 if (Optional)
                 {
@@ -71,12 +84,12 @@ namespace Microsoft.Framework.Configuration.Ini
                 }
                 else
                 {
-                    throw new FileNotFoundException(Resources.FormatError_FileNotFound(Path), Path);
+                    throw new FileNotFoundException(Resources.FormatError_FileNotFound(Subpath), Subpath);
                 }
             }
             else
             {
-                using (var stream = new FileStream(Path, FileMode.Open, FileAccess.Read))
+                using (var stream = fileInfo.CreateReadStream())
                 {
                     Load(stream);
                 }
@@ -106,7 +119,7 @@ namespace Microsoft.Framework.Configuration.Ini
                     {
                         continue;
                     }
-                    // [Section:header] 
+                    // [Section:header]
                     if (line[0] == '[' && line[line.Length - 1] == ']')
                     {
                         // remove the brackets
